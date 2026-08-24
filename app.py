@@ -23,8 +23,14 @@ st.markdown("""
 html, body, [class*="css"] { font-family: 'DM Sans', sans-serif; }
 h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; color: #07111f; }
 .stApp { background: radial-gradient(circle at 90% 5%, rgba(23,92,211,.13), transparent 32rem), linear-gradient(135deg, #f7faff 0%, #ffffff 47%, #eaf2ff 100%); }
-#MainMenu, footer { visibility: hidden; }
-[data-testid="stHeader"] { background: transparent; }
+/* Esconder o cabeçalho inteiro */
+[data-testid="stHeader"] { display: none !important; }
+/* Esconder a barra de ferramentas (Menu e ícone do GitHub) */
+[data-testid="stToolbar"] { display: none !important; }
+/* Esconder o rodapé (Made with Streamlit) */
+[data-testid="stFooter"] { display: none !important; }
+/* Esconder o botão de Deploy */
+.stDeployButton { display: none !important; }
 .hero { padding: 2.7rem 1.2rem 2.4rem; margin: 1rem 0 2rem; border: 1px solid #cdd9e9; border-radius: 18px; background: linear-gradient(115deg, #07111f 0%, #123866 62%, #175cd3 100%); box-shadow: 0 18px 42px rgba(15, 47, 92, .16); text-align: center; overflow: hidden; }
 .brand { color: #ffffff; font-family: 'Space Grotesk', sans-serif; font-size: clamp(.85rem, 4vw, 2.5rem); font-weight: 700; letter-spacing: -.06em; line-height: 1.1; white-space: nowrap; }
 .hero h2 { color: #8bd3ff; font-family: 'Space Grotesk', sans-serif; font-size: clamp(1.25rem, 2.6vw, 2rem); margin: 1rem 0 .45rem; }
