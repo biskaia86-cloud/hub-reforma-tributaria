@@ -25,11 +25,10 @@ h1, h2, h3 { font-family: 'Space Grotesk', sans-serif; color: #07111f; }
 .stApp { background: radial-gradient(circle at 90% 5%, rgba(23,92,211,.13), transparent 32rem), linear-gradient(135deg, #f7faff 0%, #ffffff 47%, #eaf2ff 100%); }
 #MainMenu, footer { visibility: hidden; }
 [data-testid="stHeader"] { background: transparent; }
-.hero { padding: 2.7rem 2.8rem 2.4rem; margin: 1rem 0 2rem; border: 1px solid #cdd9e9; border-radius: 18px; background: linear-gradient(115deg, #07111f 0%, #123866 62%, #175cd3 100%); box-shadow: 0 18px 42px rgba(15, 47, 92, .16); }
-.brand { color: #f5f9ff; font-family: 'Space Grotesk', sans-serif; font-size: clamp(2.3rem, 6vw, 4.4rem); font-weight: 700; letter-spacing: -.05em; }
-.hero h1 { color: #ffffff; font-size: clamp(1.5rem, 3vw, 2.35rem); margin: .8rem 0 .4rem; }
-.hero p { color: #dbeafe; font-size: 1.05rem; max-width: 680px; margin: 0; }
-.eyebrow { color: #8bd3ff; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; font-size: .78rem; }
+.hero { padding: 2.7rem 1.2rem 2.4rem; margin: 1rem 0 2rem; border: 1px solid #cdd9e9; border-radius: 18px; background: linear-gradient(115deg, #07111f 0%, #123866 62%, #175cd3 100%); box-shadow: 0 18px 42px rgba(15, 47, 92, .16); text-align: center; overflow: hidden; }
+.brand { color: #ffffff; font-family: 'Space Grotesk', sans-serif; font-size: clamp(.85rem, 4vw, 2.5rem); font-weight: 700; letter-spacing: -.06em; line-height: 1.1; white-space: nowrap; }
+.hero h2 { color: #8bd3ff; font-family: 'Space Grotesk', sans-serif; font-size: clamp(1.25rem, 2.6vw, 2rem); margin: 1rem 0 .45rem; }
+.hero p { color: #dbeafe; font-size: 1.05rem; max-width: 760px; margin: 0; }
 .result { padding: 1.25rem 1.4rem; border-left: 6px solid; background: rgba(255,255,255,.9); border-radius: 8px; box-shadow: 0 8px 28px rgba(15, 47, 92, .08); }
 .source-note { color: #53657c; font-size: .78rem; border-left: 2px solid #8da9cf; padding-left: .7rem; }
 .section-label { color: #175cd3; font-weight: 700; font-size: .82rem; letter-spacing: .08em; text-transform: uppercase; }
@@ -38,6 +37,9 @@ div.stButton > button:hover, div.stFormSubmitButton > button:hover { background:
 div[data-baseweb="input"] > div, div[data-baseweb="select"] > div, textarea { border-radius: 10px; border-color: #cdd9e9; background: #f7faff; }
 div[data-baseweb="input"] > div:focus-within, div[data-baseweb="select"] > div:focus-within { border-color: #175cd3; box-shadow: 0 0 0 1px #175cd3; }
 div[data-testid="stMetric"] { padding: 1rem; border: 1px solid #d8e3f0; border-radius: 12px; background: rgba(255,255,255,.72); }
+.showcase { padding: 2rem 2.2rem; border: 1px solid #cdd9e9; border-radius: 16px; background: rgba(255,255,255,.88); box-shadow: 0 14px 32px rgba(15,47,92,.10); }
+.showcase h2 { color: #07111f; margin: 0 0 .7rem; }
+.showcase p { color: #53657c; font-size: 1.05rem; line-height: 1.65; }
 @media (max-width: 640px) { .hero { padding: 2rem 1.4rem; } }
 </style>
 """, unsafe_allow_html=True)
@@ -70,13 +72,20 @@ def validate_lead(name: str, phone: str, email: str, company: str) -> str | None
 
 
 def show_header() -> None:
-    st.markdown('<div class="hero"><div class="eyebrow">QG da Reforma Tributária</div><div class="brand">CENTRAL RT</div><h1>Entenda o próximo movimento do Simples Nacional.</h1><p>Um diagnóstico executivo para antecipar impactos, créditos e decisões na transição para o modelo híbrido.</p></div>', unsafe_allow_html=True)
+    st.markdown('<div class="hero"><div class="brand">CENTRAL DA REFORMA TRIBUTARIA</div><h2>Entenda o próximo movimento do Simples Nacional.</h2><p>Um diagnóstico executivo para antecipar impactos, créditos e decisões na transição para o modelo híbrido.</p></div>', unsafe_allow_html=True)
+
+
+def showcase() -> None:
+    st.divider()
+    st.markdown('<div class="showcase"><h2>🧭 Rota Simples</h2><p>Descubra agora o impacto real da Reforma Tributária no seu negócio. Responda a 4 perguntas e descubra se migrar para o Simples Híbrido é a estratégia mais lucrativa para a sua empresa.</p></div>', unsafe_allow_html=True)
+    if st.button("Começar Diagnóstico Gratuito", type="primary", use_container_width=True):
+        st.session_state.screen = "lead"
+        st.rerun()
 
 
 def lead_gate() -> bool:
     st.divider()
     st.subheader("Comece pelo seu cadastro")
-    st.caption("Seus dados ficam armazenados localmente para liberar o diagnóstico.")
     with st.form("lead_form"):
         first_row_left, first_row_right = st.columns(2)
         name = first_row_left.text_input("Nome *")
@@ -92,7 +101,8 @@ def lead_gate() -> bool:
         else:
             st.session_state.lead = {"name": name, "phone": phone, "corporate_email": email, "company_name": company}
             st.session_state.lead_id = save_lead(name, phone, email, company)
-            st.toast("Acesso liberado!")
+            st.session_state.show_access_toast = True
+            st.session_state.screen = "diagnosis"
             st.rerun()
     return "lead" in st.session_state
 
@@ -100,6 +110,8 @@ def lead_gate() -> bool:
 def diagnosis_form() -> None:
     st.divider()
     st.subheader("Diagnóstico Rota Simples")
+    if st.session_state.pop("show_access_toast", False):
+        st.toast("Acesso liberado!")
     with st.form("diagnosis_form"):
         profile = st.selectbox("Você vende para", ["Pessoa Física (PF)", "Pessoa Jurídica (PJ)", "Ambas"])
         activity = st.selectbox("Ramo de atividade", ["Comércio", "Indústria", "Escritório de Contabilidade", "Saúde", "Tecnologia e Software", "Engenharia", "Consultoria e Auditoria", "Publicidade e Marketing", "Serviços em Geral"])
@@ -110,8 +122,9 @@ def diagnosis_form() -> None:
         try:
             normalized_revenue = revenue_text.strip().replace("R$", "").replace(".", "").replace(",", ".").strip()
             revenue = float(normalized_revenue)
-            if revenue < 0:
-                raise ValueError
+            if revenue <= 0:
+                st.warning("O faturamento informado deve ser maior que zero para prosseguirmos com a análise.")
+                return
         except ValueError:
             st.error("Informe o faturamento no formato R$ 1.250.000,00.")
             return
@@ -153,16 +166,17 @@ def show_result() -> None:
     st.bar_chart(chart_data, horizontal=True, color="#175cd3")
     st.metric("Aumento simulado da carga", format_brl(diagnosis["tax_increase"]), f'{diagnosis["tax_increase_percent"]:.1f}%')
     st.caption(diagnosis["caveat"])
-    rag = st.session_state.rag
-    with st.expander("Base consultada e premissas"):
-        st.caption("A consulta utiliza a base normativa configurada e, quando necessário, somente fontes oficiais: gov.br e receita.fazenda.gov.br.")
-        st.text(rag.context[:2500])
     pdf = build_pdf(st.session_state.lead, st.session_state.answers, diagnosis, diagnosis["normative_source"])
     st.download_button("Baixar Relatório Rota Simples (PDF)", pdf, "relatorio-rota-simples.pdf", "application/pdf", type="secondary")
 
 
+if "screen" not in st.session_state:
+    st.session_state.screen = "showcase"
+
 show_header()
-if "lead" not in st.session_state:
+if st.session_state.screen == "showcase":
+    showcase()
+elif st.session_state.screen == "lead":
     lead_gate()
 elif "diagnosis" not in st.session_state:
     diagnosis_form()
@@ -171,4 +185,5 @@ else:
     if st.button("Refazer diagnóstico"):
         st.session_state.pop("diagnosis")
         st.session_state.pop("answers")
+        st.session_state.screen = "diagnosis"
         st.rerun()
