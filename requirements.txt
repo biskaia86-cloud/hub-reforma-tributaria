@@ -5,3 +5,4 @@ langchain-community>=0.3,<1
 google-api-python-client>=2.140,<3
 google-auth>=2.34,<3
 google-auth-oauthlib>=1.2,<2
+mercadopago>=2.3,<3

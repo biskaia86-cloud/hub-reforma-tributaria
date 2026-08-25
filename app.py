@@ -2,20 +2,41 @@
 
 from __future__ import annotations
 
+import os
 import re
+import csv
+import hmac
+from datetime import datetime, timezone
+from io import StringIO
 
 import streamlit as st
 from dotenv import load_dotenv
 
-from analysis import diagnose, format_brl
-from database import initialize_database, save_lead
+load_dotenv()
+ENQUADRAMENTO_COMPLETO_DISPONIVEL = os.getenv("ENQUADRAMENTO_COMPLETO_DISPONIVEL", "false").lower() == "true"
+
+from analysis import diagnose, format_brl, project_hybrid_vs_real
+from database import get_all_leads, has_active_access, initialize_database, list_interested_leads, register_interest, save_lead
 from pdf_report import build_pdf
+import payments
 from rag import SYSTEM_PROMPT, retrieve_drive_context
 
 
 st.set_page_config(page_title="CENTRAL RT", page_icon="◈", layout="wide")
-load_dotenv()
 initialize_database()
+
+if "access_unlocked" not in st.session_state:
+    st.session_state.access_unlocked = False
+payment_id = st.query_params.get("payment_id")
+if ENQUADRAMENTO_COMPLETO_DISPONIVEL and payment_id and not st.session_state.get("payment_checked"):
+    st.session_state.payment_checked = True
+    try:
+        payment_status = payments.confirm_payment(payment_id)
+        st.session_state.payment_message = "approved" if payment_status == "approved" else "pending" if payment_status in {"pending", "in_process"} else "failed"
+        if payment_status == "approved":
+            st.session_state.access_unlocked = True
+    except Exception:
+        st.session_state.payment_message = "error"
 
 st.markdown("""
 <style>
@@ -81,12 +102,50 @@ def show_header() -> None:
     st.markdown('<div class="hero"><div class="brand">CENTRAL DA REFORMA TRIBUTARIA</div><h2>Entenda o próximo movimento do Simples Nacional.</h2><p>Um diagnóstico executivo para antecipar impactos, créditos e decisões na transição para o modelo híbrido.</p></div>', unsafe_allow_html=True)
 
 
+def _csv_download(rows: list[dict], keys: list[str], headers: list[str], filename: str, label: str) -> None:
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(headers)
+    writer.writerows([[row.get(key, "") for key in keys] for row in rows])
+    st.download_button(label, output.getvalue().encode("utf-8-sig"), filename, "text/csv")
+
+
+def admin_export() -> None:
+    """Exibe a tela administrativa protegida por parâmetro e token configurado."""
+    if st.query_params.get("admin") != "1":
+        return
+    st.subheader("Área administrativa")
+    expected_token = os.getenv("ADMIN_EXPORT_TOKEN", "").strip()
+    provided_token = st.text_input("Senha administrativa", type="password")
+    if not expected_token or not hmac.compare_digest(provided_token, expected_token):
+        st.info("Informe o token administrativo configurado para consultar os dados.")
+        return
+
+    leads = [dict(row) for row in get_all_leads()]
+    _csv_download(leads, ["id", "name", "phone", "corporate_email", "company_name", "created_at"], ["ID", "Nome", "Telefone", "E-mail", "Empresa", "Data"], "leads-locais.csv", "Exportar leads locais (CSV)")
+    interested = list_interested_leads()
+    st.metric("Pessoas interessadas", f"{len(interested)} pessoas pediram para ser avisadas sobre o Enquadramento completo")
+    st.dataframe(interested, hide_index=True, use_container_width=True)
+    _csv_download(interested, ["name", "phone", "corporate_email", "company_name", "clicked_at"], ["Nome", "Telefone", "E-mail", "Empresa", "Data do clique"], "interesse-enquadramento.csv", "Exportar interesse (CSV)")
+
+
 def showcase() -> None:
     st.divider()
     st.markdown('<div class="showcase"><h2>🧭 Rota Simples</h2><p>Descubra agora o impacto real da Reforma Tributária no seu negócio. Responda a 4 perguntas e descubra se migrar para o Simples Híbrido é a estratégia mais lucrativa para a sua empresa.</p></div>', unsafe_allow_html=True)
     if st.button("Começar Diagnóstico Gratuito", type="primary", use_container_width=True):
         st.session_state.screen = "lead"
         st.rerun()
+
+
+def has_paid_access() -> bool:
+    lead = st.session_state.get("lead")
+    return bool(st.session_state.get("access_unlocked") or (lead and has_active_access(lead["corporate_email"])))
+
+
+def parse_brl(value: str, default: float = 0.0) -> float:
+    if not value.strip():
+        return default
+    return float(value.strip().replace("R$", "").replace(".", "").replace(",", ".").strip())
 
 
 def lead_gate() -> bool:
@@ -123,6 +182,22 @@ def diagnosis_form() -> None:
         activity = st.selectbox("Ramo de atividade", ["Comércio", "Indústria", "Escritório de Contabilidade", "Saúde", "Tecnologia e Software", "Engenharia", "Consultoria e Auditoria", "Publicidade e Marketing", "Serviços em Geral"])
         revenue_text = st.text_input("Faturamento nos últimos 12 meses", value="R$ 0,00", help="Digite no padrão brasileiro, por exemplo: R$ 1.250.000,00")
         b2b_percent = st.slider("Percentual de vendas para PJ", 0, 100, 50, format="%d%%")
+        fator_r_informado = st.radio(
+            "Sua folha de pagamento (com encargos) passa de aproximadamente 28% do seu faturamento?",
+            ["Sim", "Não", "Não sei"],
+            horizontal=True,
+        )
+        aliquota_manual_text = st.text_input(
+            "Se você já sabe sua alíquota efetiva atual (informada pelo seu contador), digite aqui (%)",
+            value="",
+            help="Opcional. Exemplo: 6,50",
+        )
+        with st.expander("Projeção avançada (Enquadramento completo)"):
+            cmv_text = st.text_input("CMV anual", value="R$ 0,00")
+            expenses_text = st.text_input("Despesas operacionais anuais", value="R$ 0,00")
+            payroll_text = st.text_input("Folha de pagamento anual", value="R$ 0,00")
+            profit_margin = st.number_input("Margem de lucro estimada", min_value=0.0, max_value=1.0, value=0.15, step=0.01, format="%.2f", help="Informe 0,15 para 15%.")
+            annual_growth = st.number_input("Crescimento anual estimado", min_value=-1.0, max_value=5.0, value=0.05, step=0.01, format="%.2f", help="Informe 0,05 para 5%.")
         submitted = st.form_submit_button("Gerar meu diagnóstico", type="primary")
     if submitted:
         try:
@@ -134,9 +209,30 @@ def diagnosis_form() -> None:
         except ValueError:
             st.error("Informe o faturamento no formato R$ 1.250.000,00.")
             return
-        answers = {"profile": profile, "activity": activity, "revenue": revenue, "b2b_percent": b2b_percent}
+        fator_r = {"Sim": 0.30, "Não": 0.20, "Não sei": None}[fator_r_informado]
+        try:
+            aliquota_manual = parse_brl(aliquota_manual_text) / 100 if aliquota_manual_text.strip() else None
+            if aliquota_manual is not None and not 0 <= aliquota_manual <= 1:
+                raise ValueError
+        except ValueError:
+            st.error("Informe a alíquota manual como percentual, por exemplo: 6,50.")
+            return
+        try:
+            advanced = {"cmv": parse_brl(cmv_text), "despesas_operacionais": parse_brl(expenses_text), "folha_pagamento": parse_brl(payroll_text), "margem_lucro_estimada": profit_margin, "crescimento_anual_estimado": annual_growth}
+        except ValueError:
+            st.error("Informe os valores avançados no formato R$ 1.250,00.")
+            return
+        answers = {"profile": profile, "activity": activity, "revenue": revenue, "b2b_percent": b2b_percent, **advanced}
         st.session_state.answers = answers
-        st.session_state.diagnosis = diagnose(**answers)
+        st.session_state.diagnosis = diagnose(
+            profile=profile,
+            activity=activity,
+            revenue=revenue,
+            b2b_percent=b2b_percent,
+            fator_r=fator_r,
+            fator_r_informado=fator_r_informado,
+            aliquota_manual=aliquota_manual,
+        )
         st.session_state.rag = retrieve_drive_context(f"{activity} Simples IBS CBS crédito PJ")
         st.rerun()
 
@@ -154,12 +250,21 @@ def show_result() -> None:
     st.markdown('<div class="section-label">Leitura executiva</div>', unsafe_allow_html=True)
     st.write(diagnosis["authority_summary"])
     with st.expander("Entenda o cálculo"):
-        st.caption("Modelo ilustrativo: aplica uma taxa efetiva atual de 6% como premissa e adiciona CBS de 9,43% no cenário híbrido. Não representa uma alíquota legal definitiva.")
+        st.caption("A carga atual usa a fórmula progressiva do Simples Nacional. O cenário híbrido adiciona CBS de 9,43% como premissa ilustrativa, não como alíquota legal definitiva.")
         st.write("A leitura combina faturamento médio mensal, percentual de vendas para PJ e uma estimativa de relevância de créditos na cadeia.")
+    precision = "alta (alíquota informada por você)" if diagnosis["aliquota_informada_manualmente"] else "estimada"
+    st.info(f'Precisão: {precision}')
+    fator_texto = "com Fator R acima de 28%" if diagnosis["fator_r_informado"] == "Sim" else "com Fator R abaixo de 28%" if diagnosis["fator_r_informado"] == "Não" else "com Fator R não informado (premissa conservadora)"
+    aliquota_texto = "alíquota informada por você" if diagnosis["aliquota_informada_manualmente"] else "alíquota estimada pela faixa"
+    st.caption(f'Cálculo baseado no {diagnosis["anexo_utilizado"]} do Simples Nacional, faixa de {diagnosis["faixa_rbt12"]}, {fator_texto}, usando {aliquota_texto}.')
+    if diagnosis["rbt12_acima_limite_simples"]:
+        st.warning("Seu RBT12 está acima de R$ 4,8 milhões. A última faixa foi usada apenas como aproximação; confirme o regime tributário com seu contador.")
     st.subheader("Simulação mensal")
     current_tax = diagnosis["current_monthly_tax"]
     hybrid_tax = diagnosis["hybrid_monthly_tax"]
     calc_left, calc_right = st.columns(2)
+    calc_left.caption("HOJE (baseado no seu faturamento)")
+    calc_right.caption("CENÁRIO SIMULADO (não é uma cobrança)")
     calc_left.metric("Cenário atual", format_brl(current_tax), f'{diagnosis["current_effective_rate"] * 100:.2f}% do faturamento médio')
     calc_right.metric("Cenário híbrido simulado", format_brl(hybrid_tax), f'+{format_brl(diagnosis["tax_increase"])}', delta_color="inverse")
     st.dataframe({
@@ -170,9 +275,61 @@ def show_result() -> None:
     st.subheader("Dashboard de impacto")
     chart_data = {"Cenário atual": current_tax, "Cenário híbrido": hybrid_tax}
     st.bar_chart(chart_data, horizontal=True, color="#175cd3")
-    st.metric("Aumento simulado da carga", format_brl(diagnosis["tax_increase"]), f'{diagnosis["tax_increase_percent"]:.1f}%')
+    st.metric("Diferença estimada entre os cenários (simulação)", format_brl(diagnosis["tax_increase"]), f'{diagnosis["tax_increase_percent"]:.1f}%')
+    st.warning("Este valor compara dois cenários possíveis e não representa uma cobrança automática. A alíquota do CBS ainda não foi definida em caráter definitivo, a reforma está em transição gradual até 2033, e migrar para o híbrido depende de uma opção/enquadramento — não acontece sozinho.")
+    with st.expander("Por que este número pode não se confirmar"):
+        st.write("A reforma é gradual, e os efeitos plenos só valem a partir de 2033.")
+        st.write("A empresa não é automaticamente migrada para o híbrido; isso depende de opção ou enquadramento.")
+        st.write("O valor simulado não desconta eventual crédito de CBS/IBS sobre compras e insumos, que na prática reduziria a diferença.")
     st.caption(diagnosis["caveat"])
-    pdf = build_pdf(st.session_state.lead, st.session_state.answers, diagnosis, diagnosis["normative_source"])
+    projection = None
+    if not ENQUADRAMENTO_COMPLETO_DISPONIVEL:
+        st.markdown('<div class="showcase"><h2>Rota Simples - Enquadramento completo</h2><p>Em breve: descubra até quando vale ficar no Híbrido e a partir de que ano migrar para o Lucro Real passa a compensar. Estamos com essa funcionalidade em construção.</p></div>', unsafe_allow_html=True)
+        lead_email = st.session_state.lead["corporate_email"]
+        st.text_input("E-mail para ser avisado", value=lead_email, disabled=True)
+        if st.button("Quero ser avisado"):
+            clicked_at = datetime.now(timezone.utc).isoformat()
+            register_interest(st.session_state.lead_id)
+            try:
+                from sheets_backup import append_interest_row
+
+                lead = st.session_state.lead
+                append_interest_row(
+                    lead["name"], lead["phone"], lead["corporate_email"],
+                    lead["company_name"], clicked_at,
+                )
+            except Exception:
+                pass
+            st.success("Você será avisado assim que estiver disponível!")
+    elif has_paid_access():
+        answers = st.session_state.answers
+        projection = project_hybrid_vs_real(answers["revenue"], answers["cmv"], answers["despesas_operacionais"], answers["folha_pagamento"], answers["margem_lucro_estimada"], answers["crescimento_anual_estimado"])
+        st.subheader("Rota Simples - Enquadramento completo")
+        st.dataframe(projection["anos"], hide_index=True, use_container_width=True)
+        st.line_chart({"Híbrido": [row["carga_hibrido"] for row in projection["anos"]], "Lucro Real": [row["carga_real"] for row in projection["anos"]]})
+        if projection["crossover_year"]:
+            st.success(f'Ano de virada estimado: {projection["crossover_year"]}. Economia acumulada estimada: {format_brl(projection["economia_acumulada_periodo"])}.')
+        else:
+            st.info("Não há ponto de virada estimado no período simulado.")
+    else:
+        st.markdown('<div class="showcase"><h2>Rota Simples - Enquadramento completo</h2><p>Desbloqueie a projeção de 2025 a 2033, o ponto de virada para o Lucro Real e a economia estimada para o seu negócio.</p></div>', unsafe_allow_html=True)
+        st.write(f"Acesso mensal: **{format_brl(payments.PRODUCT_PRICE)}**")
+        if st.button("Desbloquear agora (cartão ou Pix)", type="primary"):
+            try:
+                checkout = payments.create_checkout_preference(st.session_state.lead["corporate_email"], st.session_state.lead_id)
+                st.session_state.checkout_url = checkout["checkout_url"]
+            except Exception as error:
+                st.error(f"Não foi possível iniciar o pagamento agora. Tente novamente. ({error})")
+        if st.session_state.get("checkout_url"):
+            st.link_button("Ir para o checkout Mercado Pago", st.session_state.checkout_url, use_container_width=True)
+    payment_message = st.session_state.pop("payment_message", None)
+    if payment_message == "approved":
+        st.success("Pagamento aprovado! Seu Enquadramento completo já está liberado.")
+    elif payment_message == "pending":
+        st.info("Pagamento pendente. Atualize esta página após a aprovação para liberar o enquadramento completo.")
+    elif payment_message in {"failed", "error"}:
+        st.warning("Não foi possível confirmar o pagamento. Tente novamente ou verifique o status no Mercado Pago.")
+    pdf = build_pdf(st.session_state.lead, st.session_state.answers, diagnosis, diagnosis["normative_source"], projection)
     st.download_button("Baixar Relatório Rota Simples (PDF)", pdf, "relatorio-rota-simples.pdf", "application/pdf", type="secondary")
 
 
@@ -180,6 +337,7 @@ if "screen" not in st.session_state:
     st.session_state.screen = "showcase"
 
 show_header()
+admin_export()
 if st.session_state.screen == "showcase":
     showcase()
 elif st.session_state.screen == "lead":

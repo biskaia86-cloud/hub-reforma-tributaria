@@ -46,7 +46,11 @@ def retrieve_drive_context(query: str) -> RetrievalResult:
         from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
 
-        scopes = ["https://www.googleapis.com/auth/drive.readonly"]
+        # Gere novamente token.json com scripts/gerar_token_sheets.py para incluir Sheets.
+        scopes = [
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/spreadsheets",
+        ]
         flow = InstalledAppFlow.from_client_secrets_file(str(credentials_path), scopes)
         if token_path.exists():
             from google.oauth2.credentials import Credentials

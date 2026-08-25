@@ -11,7 +11,7 @@ from reportlab.lib import colors
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 
-def build_pdf(lead: dict, answers: dict, diagnosis: dict, source: str) -> bytes:
+def build_pdf(lead: dict, answers: dict, diagnosis: dict, source: str, projection: dict | None = None) -> bytes:
     buffer = BytesIO()
     document = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=1.6 * cm, leftMargin=1.6 * cm, topMargin=1.4 * cm, bottomMargin=1.8 * cm)
     styles = getSampleStyleSheet()
@@ -62,9 +62,26 @@ def build_pdf(lead: dict, answers: dict, diagnosis: dict, source: str) -> bytes:
     cards.setStyle(TableStyle([("BACKGROUND", (0, 0), (0, -1), navy), ("BACKGROUND", (1, 0), (1, -1), blue), ("BOX", (0, 0), (-1, -1), 1.2, cyan), ("LINEBEFORE", (1, 0), (1, -1), 1.2, cyan), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 14), ("RIGHTPADDING", (0, 0), (-1, -1), 14), ("TOPPADDING", (0, 0), (-1, -1), 12), ("BOTTOMPADDING", (0, 0), (-1, -1), 12)]))
     conclusion = Table([[Paragraph("CONCLUSÃO | SIMPLES HÍBRIDO", styles["ConclusionTitle"])], [Paragraph(safe(diagnosis["recommendation"]), styles["ConclusionHeading"])], [Paragraph(safe(diagnosis["summary"]), styles["ConclusionText"])], [Paragraph(safe(diagnosis["authority_summary"]), styles["ConclusionText"])]], colWidths=[17.8 * cm])
     conclusion.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), slate), ("LINEBEFORE", (0, 0), (0, -1), 6, cyan), ("LEFTPADDING", (0, 0), (-1, -1), 18), ("RIGHTPADDING", (0, 0), (-1, -1), 18), ("TOPPADDING", (0, 0), (-1, -1), 12), ("BOTTOMPADDING", (0, 0), (-1, -1), 12)]))
-    impact_rows = [[Paragraph("RELEVÂNCIA ESTIMADA DO CRÉDITO", styles["Label"]), Paragraph(f'{diagnosis["estimated_credit_relevance"]}%', styles["Value"])], [Paragraph("CENÁRIO ATUAL ESTIMADO", styles["Label"]), Paragraph(f'R$ {diagnosis["current_monthly_tax"]:,.2f}', styles["Value"])], [Paragraph("CENÁRIO HÍBRIDO SIMULADO", styles["Label"]), Paragraph(f'R$ {diagnosis["hybrid_monthly_tax"]:,.2f}', styles["Value"])], [Paragraph("AUMENTO SIMULADO", styles["Label"]), Paragraph(f'R$ {diagnosis["tax_increase"]:,.2f} ({diagnosis["tax_increase_percent"]:.1f}%)', styles["Value"])]]
+    impact_rows = [
+        [Paragraph("RELEVÂNCIA ESTIMADA DO CRÉDITO", styles["Label"]), Paragraph(f'{diagnosis["estimated_credit_relevance"]}%', styles["Value"])],
+        [Paragraph("ANEXO UTILIZADO", styles["Label"]), Paragraph(safe(diagnosis["anexo_utilizado"]), styles["Value"])],
+        [Paragraph("FAIXA RBT12", styles["Label"]), Paragraph(safe(diagnosis["faixa_rbt12"]), styles["Value"])],
+        [Paragraph("CENÁRIO ATUAL ESTIMADO", styles["Label"]), Paragraph(f'R$ {diagnosis["current_monthly_tax"]:,.2f}', styles["Value"])],
+        [Paragraph("CENÁRIO HÍBRIDO SIMULADO", styles["Label"]), Paragraph(f'R$ {diagnosis["hybrid_monthly_tax"]:,.2f}', styles["Value"])],
+        [Paragraph("DIFERENÇA ESTIMADA (SIMULAÇÃO)", styles["Label"]), Paragraph(f'R$ {diagnosis["tax_increase"]:,.2f} ({diagnosis["tax_increase_percent"]:.1f}%)', styles["Value"])],
+    ]
     impact = Table(impact_rows, colWidths=[8.9 * cm, 8.9 * cm])
     impact.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), white), ("ROWBACKGROUNDS", (0, 0), (-1, -1), [white, colors.Color(238 / 255, 244 / 255, 255 / 255)]), ("LINEBELOW", (0, 0), (-1, -1), .6, colors.Color(183 / 255, 203 / 255, 226 / 255)), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 12), ("RIGHTPADDING", (0, 0), (-1, -1), 12), ("TOPPADDING", (0, 0), (-1, -1), 9), ("BOTTOMPADDING", (0, 0), (-1, -1), 9)]))
-    story = [header, Spacer(1, .45 * cm), Paragraph("Dados do cliente", styles["SectionTitle"]), client, Spacer(1, .4 * cm), cards, Spacer(1, .5 * cm), conclusion, Spacer(1, .4 * cm), Paragraph("Indicadores de impacto", styles["SectionTitle"]), impact, Spacer(1, .3 * cm), Paragraph(f'Base normativa: {safe(source)}.', styles["SmallMuted"]), Paragraph(safe(diagnosis["caveat"]), styles["SmallMuted"])]
+    story = [header, Spacer(1, .45 * cm), Paragraph("Dados do cliente", styles["SectionTitle"]), client, Spacer(1, .4 * cm), cards, Spacer(1, .5 * cm), conclusion, Spacer(1, .4 * cm), Paragraph("Indicadores de impacto", styles["SectionTitle"]), impact, Spacer(1, .2 * cm), Paragraph("Este valor compara dois cenários possíveis e não representa uma cobrança automática. A alíquota do CBS ainda não foi definida em caráter definitivo e a reforma está em transição gradual até 2033.", styles["SmallMuted"])]
+    if projection is not None:
+        projection_rows = [[Paragraph("ANO", styles["Label"]), Paragraph("HÍBRIDO", styles["Label"]), Paragraph("LUCRO REAL", styles["Label"]), Paragraph("DIFERENÇA", styles["Label"]), Paragraph("MELHOR", styles["Label"])]]
+        for row in projection["anos"]:
+            projection_rows.append([str(row["ano"]), f'R$ {row["carga_hibrido"]:,.2f}', f'R$ {row["carga_real"]:,.2f}', f'R$ {row["diferenca"]:,.2f}', row["regime_mais_vantajoso"]])
+        projection_table = Table(projection_rows, colWidths=[1.7 * cm, 3.8 * cm, 3.8 * cm, 3.8 * cm, 4.7 * cm], repeatRows=1)
+        projection_table.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), navy), ("TEXTCOLOR", (0, 0), (-1, 0), white), ("ROWBACKGROUNDS", (0, 1), (-1, -1), [white, colors.Color(238 / 255, 244 / 255, 255 / 255)]), ("GRID", (0, 0), (-1, -1), .4, colors.Color(183 / 255, 203 / 255, 226 / 255)), ("FONTSIZE", (0, 0), (-1, -1), 8), ("LEFTPADDING", (0, 0), (-1, -1), 5), ("RIGHTPADDING", (0, 0), (-1, -1), 5), ("TOPPADDING", (0, 0), (-1, -1), 5), ("BOTTOMPADDING", (0, 0), (-1, -1), 5)]))
+        crossover = projection["crossover_year"]
+        highlight = f"Ano de virada: {crossover}." if crossover else "Não houve ano de virada no período simulado."
+        story.extend([Spacer(1, .4 * cm), Paragraph("Rota Simples - Enquadramento completo", styles["SectionTitle"]), projection_table, Spacer(1, .2 * cm), Paragraph(safe(f'{highlight} Economia acumulada estimada: R$ {projection["economia_acumulada_periodo"]:,.2f}.'), styles["SmallMuted"])])
+    story.extend([Spacer(1, .3 * cm), Paragraph(f'Base normativa: {safe(source)}.', styles["SmallMuted"]), Paragraph(safe(diagnosis["caveat"]), styles["SmallMuted"])])
     document.build(story, onFirstPage=draw_footer, onLaterPages=draw_footer)
     return buffer.getvalue()
